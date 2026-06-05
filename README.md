@@ -105,6 +105,10 @@ uv add <套件名稱>
 
 ---
 
+1. 查看分支git branch：列出本地端（Local）所有分支，目前所在的分支前方會標記 * 號。git branch -r 或 git branch --remote：列出遠端儲存庫（Remote）的所有分支。git branch -a 或 git branch --all：列出本地端與遠端所有的分支。2. 建立分支git branch <分支名稱>：建立新分支，但建立後「不會」自動切換過去。git checkout -b <分支名稱>：建立新分支，並立刻切換到該分支（等同於先建立再切換）。git switch -c <分支名稱>：在較新的 Git 版本中，推薦使用此指令來建立並切換新分支。3. 刪除與重新命名分支git branch -d <分支名稱>：刪除已合併的分支。如果該分支的程式碼尚未完全合併，Git 會拒絕刪除。git branch -D <分支名稱>：強制刪除指定分支（即使尚未合併也會強制移除）。git branch -m <舊名稱> <新名稱>：重新命名分支。
+
+---
+
 ## 常見問題
 
 **Q: `uv: command not found`**
