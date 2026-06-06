@@ -164,11 +164,11 @@ COURSE = [
 
 # (B) 專題 offset 例題（真實 CAN 訊框，C 由 frame_tx_time 算）
 def build_project(offsets):
-    spec = [("Engine", 0x100, 10, 4), ("Wheel", 0x200, 10, 4),
-            ("Brake", 0x300, 20, 8), ("Body", 0x400, 50, 8)]
+    spec = [("Engine", 0x100, 1, 4), ("Wheel", 0x200, 1, 4),
+            ("Brake", 0x300, 2, 8), ("Body", 0x400, 2, 8)]
     return [Message(n, i, p, dlc=d, offset=offsets.get(i, 0.0)) for n, i, p, d in spec]
-SCEN_A = build_project({})                                  # 全部 t=0
-SCEN_B = build_project({0x100: 0, 0x200: 5, 0x300: 2, 0x400: 7})  # 錯開
+SCEN_A = build_project({})                                            # 全部 t=0
+SCEN_B = build_project({0x100: 0, 0x300: 0.25, 0x200: 0.5, 0x400: 0.75})  # 錯開
 
 # (C) 反駁例題（util=0.895）—— 讓 Davis 抓到「第二個實例才是最差」
 REFUTE = [
@@ -183,6 +183,64 @@ RESULT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result")
 # ---------------------------------------------------------------------------
 # Part 6  主流程
 # ---------------------------------------------------------------------------
+def plot_verification(save_dir, ts):
+    """驗證圖：上半描述訊息特徵（公式的輸入），下半三方對照結果。"""
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    import numpy as np
+    t = wcrt_tindell(COURSE)
+    formula = {m.name: t[m.name][0] for m in COURSE}
+    rsim, _ = simulate(COURSE, 4000)
+    sim = {m.name: max(rsim[m.name]) for m in COURSE}
+    lecture = {"u0": 50, "u1": 100, "u2": 120, "u3": None}
+    role = {"u0": "最高優先權，不被任何訊息阻擋",
+            "u1": "傳輸時間最長之一（C=40）",
+            "u2": "← 被驗證的目標訊息",
+            "u3": "最低優先權，是最大的阻塞來源"}
+
+    names = ["u0", "u1", "u2", "u3"]
+    fig = plt.figure(figsize=(12, 9))
+    gs = gridspec.GridSpec(2, 1, height_ratios=[1, 2.1], hspace=0.28)
+
+    # 上：訊息特徵表（描述每個訊息「是什麼」）
+    axt = fig.add_subplot(gs[0]); axt.axis("off")
+    axt.set_title("訊息特徵：這就是公式的輸入（取自課堂 Example #5）", fontsize=13, fontweight="bold")
+    cols = ["訊息", "優先權", "傳輸時間 C (ms)", "週期 T (ms)", "特性說明"]
+    cells = [[m.name, f"P={m.can_id}（{'最高' if m.can_id==0 else '最低' if m.can_id==3 else '中'}）",
+              f"{m.C:.0f}", f"{m.period:.0f}", role[m.name]] for m in COURSE]
+    tbl = axt.table(cellText=cells, colLabels=cols, cellLoc="center", loc="center",
+                    colWidths=[0.08, 0.16, 0.18, 0.15, 0.43])
+    tbl.auto_set_font_size(False); tbl.set_fontsize(10.5); tbl.scale(1, 1.7)
+    for j in range(len(cols)):
+        tbl[0, j].set_facecolor("#34495e"); tbl[0, j].get_text().set_color("white")
+    for i in range(1, len(COURSE) + 1):
+        tbl[i, 0].set_facecolor("#ecf0f1")
+
+    # 下：三方對照結果
+    ax = fig.add_subplot(gs[1])
+    x, w = np.arange(len(names)), 0.27
+    lec_vals = [lecture[n] if lecture[n] is not None else np.nan for n in names]
+    ax.bar(x - w, lec_vals, w, label="課堂手算 (LEC-02 p.28)", color="#c0392b", alpha=0.85)
+    ax.bar(x,     [formula[n] for n in names], w, label="我的公式 (Tindell)", color="#2980b9", alpha=0.85)
+    ax.bar(x + w, [sim[n] for n in names], w, label="我的模擬 (觀測最大)", color="#27ae60", alpha=0.5, hatch="//")
+    for i, n in enumerate(names):
+        if lecture[n] is not None:
+            ax.text(x[i] - w, lec_vals[i] + 1.5, f"{lec_vals[i]:.0f}", ha="center", fontsize=8)
+            if abs(lecture[n] - formula[n]) < 1e-6:
+                ax.text(x[i] - w / 2, max(formula[n], lec_vals[i]) + 7, "✓ 相符",
+                        ha="center", fontsize=10, color="#c0392b", fontweight="bold")
+        ax.text(x[i], formula[n] + 1.5, f"{formula[n]:.0f}", ha="center", fontsize=8)
+        ax.text(x[i] + w, sim[n] + 1.5, f"{sim[n]:.0f}", ha="center", fontsize=8)
+    ax.text(x[3], formula["u3"] + 7, "(課堂練習題)", ha="center", fontsize=8, color="gray")
+    ax.set_ylabel("最差反應時間 R (ms)"); ax.set_xticks(x); ax.set_xticklabels(names)
+    ax.set_title("驗證結果：我的公式 = 課堂手算（證明算對）｜ 模擬 ≤ 公式（上界安全）")
+    ax.legend(loc="upper left"); ax.grid(axis="y", ls="--", alpha=0.4); ax.set_ylim(0, 150)
+
+    path = os.path.join(save_dir, f"verification_{ts}.png")
+    fig.savefig(path, dpi=140, bbox_inches="tight")
+    return path
+
+
 def main():
     # === (1) 用課堂例題驗證公式 ===
     print("=" * 60)
@@ -250,27 +308,35 @@ def main():
         ax1.set_title("① 反應時間：理論上界 vs 模擬")
         ax1.legend(loc="upper left"); ax1.grid(axis="y", ls="--", alpha=0.4)
 
-        # 子圖②③：甘特圖（淺色=等待排隊，深色=傳輸中）
+        # 子圖②③：甘特圖。兩張用「同一個時間軸」(視窗=2×最長週期)，可看到每個訊息兩個週期
+        # 淺色=等待排隊、深色=傳輸中，兩段總長 = 反應時間 R（每個實例上方標數字）
+        window = 2 * max(m.period for m in SCEN_A)
         def gantt(ax, g, title):
             row = {n: i for i, n in enumerate(names)}
             for nm, rel, s, e in g:
-                if rel > 50: continue
+                if rel >= window: continue
                 if s - rel > 1e-6:
-                    ax.barh(row[nm], s - rel, left=rel, height=0.45, color=col[nm], alpha=0.18)
-                ax.barh(row[nm], e - s, left=s, height=0.45, color=col[nm], alpha=0.9,
+                    ax.barh(row[nm], s - rel, left=rel, height=0.42, color=col[nm], alpha=0.18)
+                ax.barh(row[nm], e - s, left=s, height=0.42, color=col[nm], alpha=0.95,
                         edgecolor="black", linewidth=0.4)
+                ax.text(rel, row[nm] + 0.27, f"{e - rel:.2f}", fontsize=7,
+                        color=col[nm], ha="left", va="bottom", fontweight="bold")
             ax.set_yticks(range(len(names))); ax.set_yticklabels(names)
-            ax.set_xlim(0, 50); ax.set_title(title); ax.grid(axis="x", ls=":", alpha=0.4)
+            ax.set_ylim(-0.55, len(names) - 0.05); ax.set_xlim(0, window)
+            ax.set_title(title); ax.set_xlabel("時間 (ms)"); ax.grid(axis="x", ls=":", alpha=0.4)
             ax.legend(handles=[mpatches.Patch(facecolor="gray", alpha=0.18, label="等待排隊"),
-                               mpatches.Patch(facecolor="gray", alpha=0.9, label="傳輸中")],
+                               mpatches.Patch(facecolor="gray", alpha=0.95, label="傳輸中"),
+                               mpatches.Patch(facecolor="white", edgecolor="white",
+                                              label="數字 = 反應時間 R(ms)")],
                       loc="upper right", fontsize=8)
-        gantt(axA, gantt_a, "② 匯流排甘特圖 — 情境A：全部 t=0 同時釋放")
-        gantt(axB, gantt_b, "③ 匯流排甘特圖 — 情境B：offset 錯開")
-        axB.set_xlabel("時間 (ms)")
+        gantt(axA, gantt_a, "② 甘特圖 情境A：全部 t=0 同時釋放")
+        gantt(axB, gantt_b, "③ 甘特圖 情境B：offset 錯開")
 
         path = os.path.join(RESULT_DIR, f"charts_{ts}.png")
         fig.savefig(path, dpi=130, bbox_inches="tight")
-        print(f"\n已存圖：{path}   （使用字型：{_FONT or '英文 fallback'}）")
+        vpath = plot_verification(RESULT_DIR, ts)
+        print(f"\n已存圖：{path}")
+        print(f"已存驗證圖：{vpath}   （使用字型：{_FONT or '英文 fallback'}）")
         plt.show()
     except ImportError:
         print("\n（要看圖請先 pip install matplotlib）")
